@@ -3,34 +3,47 @@
  * @homepage https://github.com/kuitos/
  * @since 2015-08-06
  */
-var path = require('path');
-var argv = require('yargs').argv;
-var webpack = require('webpack');
-var HTMLPlugin = require('html-webpack-plugin');
-var autoprefixer = require('autoprefixer');
-var CleanPlugin = require('clean-webpack-plugin');
-var ExtractTextPlugin = require('extract-text-webpack-plugin');
-var OptimizeCssAssetsPlugin = require('optimize-css-assets-webpack-plugin');
-var cssnano = require('cssnano');
-var cssNanoCommonOpts = {
+const path = require('path');
+const argv = require('yargs').argv;
+const webpack = require('webpack');
+const HTMLPlugin = require('html-webpack-plugin');
+const autoprefixer = require('autoprefixer');
+const CleanPlugin = require('clean-webpack-plugin');
+const ExtractTextPlugin = require('extract-text-webpack-plugin');
+const OptimizeCssAssetsPlugin = require('optimize-css-assets-webpack-plugin');
+const genRules = require('./webpack-common.config');
+const cssnano = require('cssnano');
+const cssNanoCommonOpts = {
 	discardComments: {removeAll: true},
 	discardDuplicates: true,
 	discardOverridden: true,
 	discardUnused: true,
 	minifyGradients: true
 };
-var publicPath = argv.env;
+
+// 根据 build 变量获取应用信息及系统环境等信息
+const srcCodeDir = path.join(__dirname, 'src');
+const buildOutputDir = path.join(__dirname, 'angular-styleguide');
+const packageInfo = require('./package.json');
+const packageName = packageInfo.name;
+const appName = packageName.substr(packageName.indexOf('ccms-') + 5);
+const publicPath = '/' + appName + '/';
+const systemEnv = argv.env;
+// 不同环境的系统 api 接口信息
+const apiDomains = require('./api-domain.json');
 
 module.exports = {
-	env: 'production',
 	devtool: 'source-map',
-	context: path.join(__dirname, 'src'),
-	entry: './app/index.js',
+	context: srcCodeDir,
+	entry: {
+		app: './app/index.js',
+		lib: Object.keys(packageInfo.dependencies)
+	},
 	output: {
-		path: path.join(__dirname, publicPath),
-		filename: '[name]-[hash:20].min.js',
-		publicPath: '/' + publicPath + '/',
-		jsonpFunction: 'appJsonp'
+		path: buildOutputDir,
+		filename: '[name]-[chunkhash:20].min.js',
+		publicPath,
+		jsonpFunction: appName.split('-').join('') + 'Jsonp'
 	},
 	externals: {
 		'angular': 'angular',
@@ -39,112 +52,69 @@ module.exports = {
 		'ccms-components': '\'ccms.components\''
 	},
 	plugins: [
-		new CleanPlugin([publicPath]),
+		new CleanPlugin([buildOutputDir]),
 		new webpack.DefinePlugin({
 			'process.env': {
-				NODE_ENV: JSON.stringify('production')
+				NODE_ENV: JSON.stringify('production'),
+				API_DOMAIN: JSON.stringify(apiDomains[systemEnv])
 			}
 		}),
 		new HTMLPlugin({
 			template: './index.html',
-			filename: '../' + publicPath + '/index.html',
+			filename: buildOutputDir + '/index.html',
+			excludeChunks: ['lib'],
 			inject: false
 		}),
-		// new webpack.optimize.UglifyJsPlugin({
-		// 	include: /\.min\.js$/,
-		// 	minimize: true
-		// }),
-		new ExtractTextPlugin('[name]-[hash:20].min.css'),
+		new webpack.optimize.CommonsChunkPlugin({
+			name: 'init',
+			chunks: ['app', 'lib']
+		}),
+		new webpack.optimize.UglifyJsPlugin({
+			sourceMap: true,
+			compress: {
+				warnings: true
+			},
+			include: /\.min\.js$/
+		}),
+		new ExtractTextPlugin({
+			filename: '[name]-[hash:20].min.css',
+			disable: false,
+			allChunks: true
+		}),
 		// 处理extract出来的css
 		new OptimizeCssAssetsPlugin({
 			assetNameRegExp: /\.css$/g,
-			cssProcessor: cssnano,
+			cssProcessor: cssnano({reduceIdents: false}),
 			cssProcessorOptions: Object.assign({
 				core: false
 			}, cssNanoCommonOpts),
 			canPrint: true
 		}),
-		new OptimizeCssAssetsPlugin({
-			assetNameRegExp: /\.min\.css$/g,
-			cssProcessor: cssnano,
-			cssProcessorOptions: cssNanoCommonOpts,
-			canPrint: true
-		}),
-		new webpack.optimize.DedupePlugin(),
-		new webpack.NoErrorsPlugin()
+		new webpack.NoErrorsPlugin(),
+		new webpack.LoaderOptionsPlugin({
+			options: {
+				env: systemEnv,
+				context: srcCodeDir,
+				output: {
+					path: buildOutputDir
+				},
+				minimize: true,
+				postcss: [autoprefixer({browsers: ['Chrome > 35', 'Firefox > 30', 'Safari > 7']})],
+				eslint: {
+					emitWarning: true,
+					emitError: true,
+					formatter: require('eslint-friendly-formatter')
+				},
+			}
+		})
 	],
 	resolve: {
-		extensions: ['', '.js']
+		extensions: ['.js']
 	},
-	eslint: {
-		emitWarning: true,
-		emitError: true,
-		formatter: require('eslint-friendly-formatter')
+	resolveLoader: {
+		moduleExtensions: ['-loader']
 	},
-	postcss: [autoprefixer({browsers: ['Chrome > 35', 'Firefox > 30', 'Safari > 7']})],
 	module: {
-		preLoaders: [
-			{
-				test: /\.js?$/,
-				loader: 'eslint-loader',
-				exclude: /node_modules/,
-				include: path.join(__dirname, 'src')
-			}
-		],
-
-		loaders: [
-			{
-				test: /\.js?$/,
-				loaders: ['babel'],
-				exclude: /(node_modules|bower_components)/,
-				include: [path.join(__dirname, 'src'), path.join(__dirname, 'demo')]
-			},
-			{
-				test: /\.tpl\.html$/,
-				loader: 'html',
-				query: {interpolate: true},
-				exclude: /(node_modules|bower_components)/,
-				include: path.join(__dirname, 'src/components')
-			},
-
-			{
-				test: /.html$/,
-				loader: 'file?name=[path][name]-[hash:20].[ext]',
-				exclude: /(node_modules|bower_components)/,
-				include: path.join(__dirname, 'src/app')
-			},
-			{
-				test: /\.(sc|c)ss$/,
-				loader: ExtractTextPlugin.extract({
-					loader: 'css?-minimize!postcss!resolve-url!sass?sourceMap',
-					fallbackLoader: 'style'
-				}),
-				exclude: /(node_modules|bower_components)/
-			},
-			{
-				test: /\.(jpe?g|png|gif)$/i,
-				loaders: [
-					'file?hash=sha512&digest=hex&name=[hash:20].[ext]',
-					'image-webpack?bypassOnDebug&optimizationLevel=7&interlaced=false'
-				]
-			},
-			{
-				test: /\.(woff|woff2)(\?v=\d+\.\d+\.\d+)?$/,
-				loader: 'url?limit=15000&mimetype=application/font-woff&prefix=fonts'
-			},
-			{
-				test: /\.ttf(\?v=\d+\.\d+\.\d+)?$/,
-				loader: 'url?limit=15000&mimetype=application/octet-stream&prefix=fonts'
-			},
-			{
-				test: /\.eot(\?#\w+)?$/,
-				loader: 'url?limit=15000&mimetype=application/vnd.ms-fontobject&prefix=fonts'
-			},
-			{
-				test: /\.svg(#\w+)?$/,
-				loader: 'url?limit=15000&mimetype=image/svg+xml&prefix=fonts'
-			}
-
-		]
+		rules: genRules(srcCodeDir, publicPath, false)
 	}
 };

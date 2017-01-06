@@ -1,0 +1,6 @@
+{
+  "develop": "",
+  "qa": "//qa-ual.fenxibao.com",
+  "stage": "//stage-ual.fenxibao.com",
+  "production": "//ual.fenxibao.com"
+}
